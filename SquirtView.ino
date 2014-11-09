@@ -810,6 +810,7 @@ typedef struct msg_req_data_packed_int {
 
 typedef struct msq_req_data_bit_info {
   unsigned int varbyt:4;
+  unsigned int spare:1;
   unsigned int varoffset:11;
   unsigned int varblk:4;
 } msg_req_data_bit_info;
@@ -826,6 +827,8 @@ unsigned long validity_window2;
 
 byte histogram[64]; // 512 memory usage
 byte histogram_index;
+
+unsigned int accel_x,accel_y,accel_z;
 
 // -------------------------------------------------------------
 void setup(void) {
@@ -867,7 +870,7 @@ void loop(void) {
     commTimer.reset();
     connectionState = false;
   }
-  if (connectionState && displayTimer.check()) { // otherwise, update the display
+  if (connectionState && displayTimer.check()) { // otherwise, update the display and send any CAN broadcasts
     //R_index=myEnc.read()/4;
     if (! value_oob() ) {
       switch (B_index) {
@@ -1012,7 +1015,13 @@ void loop(void) {
             Serial.print(" Block: ");
             Serial.print(msg_req_data.values.varblk);
             Serial.print(" Offset: ");
-            Serial.print(msg_req_data.values.varoffset);
+            Serial.println(msg_req_data.values.varoffset);
+            binDump(msg_req_data.values.varbyt);
+            Serial.print(" ");
+            binDump(msg_req_data.values.varblk);
+            Serial.print(" ");
+            binDump(highByte(msg_req_data.values.varoffset));
+            binDump(lowByte(msg_req_data.values.varoffset));
             // Create the tx packet header
             txmsg_id.values.msg_type = 2; // MSG_RSP
             txmsg_id.values.to_id = msCANid; // MS should always be 0
@@ -1028,23 +1037,78 @@ void loop(void) {
                  rtc_sec          = scalar, U08,  110, "", 1,0
                  rtc_min          = scalar, U08,  111, "", 1,0
                  rtc_hour         = scalar, U08,  112, "", 1,0
-                 rtc_day          = scalar, U08,  113, "", 1,0
+                 rtc_day          = scalar, U08,  113, "", 1,0 // not sure what "day" means. seems to be ignored...
                  rtc_date         = scalar, U08,  114, "", 1,0
                  rtc_month        = scalar, U08,  115, "", 1,0
                  rtc_year         = scalar, U16,  116, "", 1,0
-               */
+              */
+              // placeholder until gps hardware is in place. send back hard coded time
               txmsg.buf[0] = 30;
-              txmsg.buf[1] = 43;
-              txmsg.buf[2] = 15;
-              txmsg.buf[3] = 5;
-              txmsg.buf[4] = 7;
+              txmsg.buf[1] = 15;
+              txmsg.buf[2] = 11;
+              txmsg.buf[3] = 0;
+              txmsg.buf[4] = 8;
               txmsg.buf[5] = 11;
               txmsg.buf[6] = 2014 / 256;
               txmsg.buf[7] = 2014 % 256;
+              // send the message!
+              CANbus.write(txmsg);
+            } else if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 128) { // gps1
+              /*
+                 gps_latdeg       = scalar, S08,  128, "", 1,0
+                 gps_latmin       = scalar, U08,  129, "", 1,0
+                 gps_latmmin      = scalar, U16,  130, "", 1,0
+                 gps_londeg       = scalar, U08,  132, "", 1,0
+                 gps_lonmin       = scalar, U08,  133, "", 1,0
+                 gps_lonmmin      = scalar, U16,  134, "", 1,0
+              */
+              txmsg.buf[0] = 0;
+              txmsg.buf[1] = 0;
+              txmsg.buf[2] = 0;
+              txmsg.buf[3] = 0;
+              txmsg.buf[4] = 0;
+              txmsg.buf[5] = 0;
+              txmsg.buf[6] = 0;
+              txmsg.buf[7] = 0;
+              // send the message!
+              CANbus.write(txmsg);
+            } else if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 136) { // gps2
+              /*
+                 gps_lonEW        = scalar, U08,  136, "", 1,0
+                 gps_altk         = scalar, S08,  137, "", 1,0
+                 gps_altm         = scalar, S16,  138, "", 0.1,0
+                 gps_speedkm      = scalar, U16,  140, "", 0.1,0
+                 gps_course       = scalar, U16,  142, "", 0.1,0
+                 gps_speed        = scalar, U16,  144, "", 0.1,0
+              */
+              txmsg.buf[0] = 0;
+              txmsg.buf[1] = 0;
+              txmsg.buf[2] = 0;
+              txmsg.buf[3] = 0;
+              txmsg.buf[4] = 0;
+              txmsg.buf[5] = 0;
+              txmsg.buf[6] = 0;
+              txmsg.buf[7] = 0;
+              // send the message!
+              CANbus.write(txmsg);
+            } else if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 2) { // ADC 1-4 - accelerometer
+
+              accel_x = 217;
+              accel_y = 483;
+              accel_z = 350;
+              txmsg.id = 1100;
+              txmsg.buf[0] = accel_x / 256;
+              txmsg.buf[1] = accel_x % 256;
+              txmsg.buf[2] = accel_y / 256;
+              txmsg.buf[3] = accel_y % 256;
+              txmsg.buf[4] = accel_z / 256;
+              txmsg.buf[5] = accel_z % 256;
+              txmsg.buf[6] = 0;
+              txmsg.buf[7] = 0;
+              // send the message!
+              CANbus.write(txmsg);
             }
 
-            // send the message!
-            CANbus.write(txmsg);
             Serial.println("");
             Serial.print("Response sent! ");
             hexDump( sizeof(txmsg.buf), (uint8_t *)&txmsg.buf );
