@@ -1093,10 +1093,10 @@ void loop(void) {
               CANbus.write(txmsg);
             } else if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 2) { // ADC 1-4 - accelerometer
 
-              accel_x = 217;
-              accel_y = 483;
-              accel_z = 350;
-              txmsg.id = 1100;
+              accel_x = 100;
+              accel_y = 200;
+              accel_z = 300;
+              //txmsg.id = 1100;
               txmsg.buf[0] = accel_x / 256;
               txmsg.buf[1] = accel_x % 256;
               txmsg.buf[2] = accel_y / 256;
@@ -1104,11 +1104,29 @@ void loop(void) {
               txmsg.buf[4] = accel_z / 256;
               txmsg.buf[5] = accel_z % 256;
               txmsg.buf[6] = 0;
-              txmsg.buf[7] = 0;
+              txmsg.buf[7] = 62;
               // send the message!
               CANbus.write(txmsg);
             }
 
+            Serial.println("");
+            binDump(txmsg_id.values.to_id);
+            Serial.print(" ");
+            binDump(txmsg_id.values.from_id);
+            Serial.print(" ");
+            binDump(txmsg_id.values.block);
+            Serial.print(" ");
+            binDump(txmsg_id.values.offset);
+            Serial.println("");
+            binDump(txmsg_id.b.b0);
+            Serial.println("");
+            binDump(txmsg_id.b.b1);
+            Serial.println("");
+            binDump(txmsg_id.b.b2);
+            Serial.println("");
+            binDump(txmsg_id.b.b3);
+            Serial.println("");
+            Serial.write(txmsg_id.i);
             Serial.println("");
             Serial.print("Response sent! ");
             hexDump( sizeof(txmsg.buf), (uint8_t *)&txmsg.buf );
