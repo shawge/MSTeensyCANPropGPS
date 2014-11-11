@@ -10,24 +10,33 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Time.h>
 
 #include <Adafruit_NeoPixel.h>
 #define NEOPIN 5
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(16, NEOPIN, NEO_GRB + NEO_KHZ800);
 
 #include <Encoder.h>
-Encoder myEnc(18, 19); // interrupts on pin18, 19
-#define RBUTTON_INT 0 // pin 2
+Encoder myEnc(7, 6); // interrupts on pin6, 7
+#define RBUTTON_INT 15 // pin 15
 const unsigned long debouncing_time = 150; //Debouncing Time - 150 is good, 200 is better, 250 seems worse
 volatile unsigned long last_millis; //switch debouncing
 
 // OLED display
+/* Software SPI
 #define OLED_MOSI   9
 #define OLED_CLK   10
 #define OLED_DC    11
 #define OLED_CS    12
 #define OLED_RESET 8
 Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
+*/
+
+// Hardware SPI
+#define OLED_DC     10
+#define OLED_CS     9
+#define OLED_RESET  8
+Adafruit_SSD1306 display(OLED_DC, OLED_RESET, OLED_CS);
 
 #if (SSD1306_LCDHEIGHT != 64)
 #error("Height incorrect, please fix Adafruit_SSD1306.h!");
@@ -39,6 +48,7 @@ const int msCANid = 0;
 // Metro ticks are milliseconds
 Metro commTimer = Metro(1000); // display an error message if no CAN data during this interval
 Metro displayTimer = Metro(100); // refresh the display at this interval
+Metro ledTimer = Metro(1); // how long to flash the led upon CAN frame receive/transmit
 boolean connectionState = false;
 
 int led = 13;
@@ -775,6 +785,11 @@ static void binDump(char working) {
   }
 }
 
+static void ledBlink() {
+  ledTimer.reset();
+  digitalWrite(led, 1);
+}
+
 // pack/unpack the Megasquirt extended message format header
 typedef struct msg_packed_int {
   unsigned char b0;
@@ -832,9 +847,16 @@ unsigned int accel_x,accel_y,accel_z;
 
 // -------------------------------------------------------------
 void setup(void) {
+  SPI.setSCK(14); // alternate clock pin so we can still use the LED
+  setTime(1415515398);
   CANbus.begin();
   pinMode(led, OUTPUT);
   digitalWrite(led, 1);
+
+  // set encoder pins as input with internal pull-up resistors enabled
+  pinMode(RBUTTON_INT, INPUT);
+  digitalWrite(RBUTTON_INT, HIGH);
+  attachInterrupt(RBUTTON_INT, ISR_debounce, FALLING);
 
   strip.begin();
   // For a set of NeoPixels the first NeoPixel is 0, second is 1, all the way up to the count of pixels minus one.
@@ -854,12 +876,16 @@ void setup(void) {
 
   delay(1000);
   //Serial.println(F("Hello Teensy 3.1 CAN Test."));
-
+  digitalWrite(led, 0);
   //commTimer.reset();
 }
 
 // -------------------------------------------------------------
 void loop(void) {
+  if (ledTimer.check() && digitalRead(led)) {
+    digitalWrite(led, 0);
+    ledTimer.reset();
+  }
   if (commTimer.check()) { // see if we have gotten any CAN messages in the last second. display an error if not
     display.clearDisplay();
     display.setTextSize(1);
@@ -871,7 +897,7 @@ void loop(void) {
     connectionState = false;
   }
   if (connectionState && displayTimer.check()) { // otherwise, update the display and send any CAN broadcasts
-    //R_index=myEnc.read()/4;
+    R_index=myEnc.read()/4;
     if (! value_oob() ) {
       switch (B_index) {
       case 0:
@@ -908,12 +934,13 @@ void loop(void) {
   if ( CANbus.read(rxmsg) ) {
     commTimer.reset();
     connectionState = true;
+    ledBlink();
     switch (rxmsg.id) {
     case 1520: // 0
       RPM=(int)(word(rxmsg.buf[6], rxmsg.buf[7]));
       //rpm = 256*rxmsg.buf[6]+rxmsg.buf[7];
       //toggle the led to show comms data
-      digitalWrite(led, digitalRead(led) ^ 1);
+      //digitalWrite(led, digitalRead(led) ^ 1);
       //debug output of vars
       //Serial.write("RPM: ");
       //Serial.print(RPM);
@@ -1043,14 +1070,14 @@ void loop(void) {
                  rtc_year         = scalar, U16,  116, "", 1,0
               */
               // placeholder until gps hardware is in place. send back hard coded time
-              txmsg.buf[0] = 30;
-              txmsg.buf[1] = 15;
-              txmsg.buf[2] = 11;
+              txmsg.buf[0] = second();
+              txmsg.buf[1] = minute();
+              txmsg.buf[2] = hour();
               txmsg.buf[3] = 0;
-              txmsg.buf[4] = 8;
-              txmsg.buf[5] = 11;
-              txmsg.buf[6] = 2014 / 256;
-              txmsg.buf[7] = 2014 % 256;
+              txmsg.buf[4] = day();
+              txmsg.buf[5] = month();
+              txmsg.buf[6] = year() / 256;
+              txmsg.buf[7] = year() % 256;
               // send the message!
               CANbus.write(txmsg);
             } else if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 128) { // gps1
@@ -1258,15 +1285,14 @@ void ISR_debounce () { // interrupt handler for the encoder button
       display.clearDisplay();
       return;
     }
-    if (B_index < 5) {
+    if (B_index < 4) {
       B_index++;
       M_index=0;
       R_index=0;
       myEnc.write(0);
     }
-    if (B_index == 5) {
+    if (B_index == 4) {
       //menu settings
-      B_index=5;
       if (R_index >= 3) {
         //save selected - return to main menu
         M_index=0;
@@ -1579,6 +1605,7 @@ void gauge_warning() {
 
 
 void gauge_debug() {
+  display.clearDisplay();
   display.setCursor(32,0);
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -2034,12 +2061,16 @@ void gauge_menu() {
   if (R_index < 0) {
     R_index = 0;
   }
+
   display.setTextColor(WHITE);
   display.clearDisplay();
   display.setCursor(0,0);
   display.setTextSize(2);
 
   if (S_index == 0) {
+    if (R_index > 3) {
+      R_index = 3;
+    }
     switch (R_index) {
 
     case 0:
