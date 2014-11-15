@@ -930,51 +930,11 @@ void loop(void) {
     nmeaReceived = GPS.encode(Serial1.read());
   }
 
-  //while(Serial1.available())
-  //Serial.write(Serial1.read());
-  if (GPS.location.isUpdated()) {
-    // Read GPS data using gps.location.lat() etc.
-    /*
-    Serial.print(F("LOCATION   Fix Age="));
-      Serial.print(GPS.location.age());
-      Serial.print(F("ms Raw Lat="));
-      Serial.print(GPS.location.rawLat().negative ? "-" : "+");
-      Serial.print(GPS.location.rawLat().deg);
-      Serial.print("[+");
-      Serial.print(GPS.location.rawLat().billionths);
-      Serial.print(F(" billionths],  Raw Long="));
-      Serial.print(GPS.location.rawLng().negative ? "-" : "+");
-      Serial.print(GPS.location.rawLng().deg);
-      Serial.print("[+");
-      Serial.print(GPS.location.rawLng().billionths);
-      Serial.print(F(" billionths],  Lat="));
-      Serial.print(GPS.location.lat(), 6);
-      Serial.print(F(" Long="));
-      Serial.println(GPS.location.lng(), 6);
-    */
+  if (GPS.location.isUpdated()) { // set local clock from GPS
     if (GPS.time.age() < 500) {
       setTime(GPS.time.hour(), GPS.time.minute(), GPS.time.second(), GPS.date.day(), GPS.date.month(), GPS.date.year());
-      //Serial.println(hour());
       adjustTime(-8 * SECS_PER_HOUR);
     }
-    /*
-    //  }
-      //if ((GPS.date.isUpdated() || GPS.time.isUpdated()) && (GPS.date.age() < 500 || GPS.time.age() < 500)) {
-
-        //Serial.print((int)GPS.time.value() / 1000);
-          Serial.print(hour());
-          Serial.print(":");
-      Serial.print(minute());
-      Serial.print(":");
-      Serial.print(second());
-      Serial.print(" ");
-      Serial.print(day());
-      Serial.print(" ");
-      Serial.print(month());
-      Serial.print(" ");
-      Serial.print(year());
-      Serial.println();
-    */
   }
   if (commTimer.check()) { // see if we have gotten any CAN messages in the last second. display an error if not
     clear();
@@ -982,10 +942,6 @@ void loop(void) {
     display.setTextColor(WHITE);
     display.setCursor(0,56);
     display.println("Waiting for data...");
-    display.setCursor(0,16);
-    display.println(GPS.location.lat(),6);
-    display.println(GPS.location.rawLat().minutes);
-    display.println((GPS.location.rawLat().billionths * 3 / 50000) - GPS.location.rawLat().minutes * 1000);
     display.display();
     commTimer.reset();
     connectionState = false;
@@ -998,7 +954,7 @@ void loop(void) {
     }
     gpsTimer.reset();
   }
-  if (connectionState && displayTimer.check()) { // otherwise, update the display and send any CAN broadcasts
+  if (connectionState && displayTimer.check()) { // main display routine
     R_index=myEnc.read()/4;
     if (! value_oob() ) {
       switch (B_index) {
@@ -1032,29 +988,14 @@ void loop(void) {
     displayTimer.reset();
   }
 
-  // if not time-delayed, read CAN messages and print 1st byte
-  //if ( !rxTimer ) {
+  // handle received CAN frames
   if ( CANbus.read(rxmsg) ) {
     commTimer.reset();
     connectionState = true;
     ledBlink();
-    switch (rxmsg.id) {
+    switch (rxmsg.id) { // ID's 1520+ are Megasquirt CAN broadcast frames
     case 1520: // 0
       RPM=(int)(word(rxmsg.buf[6], rxmsg.buf[7]));
-      //rpm = 256*rxmsg.buf[6]+rxmsg.buf[7];
-      //toggle the led to show comms data
-      //digitalWrite(led, digitalRead(led) ^ 1);
-      //debug output of vars
-      //Serial.write("RPM: ");
-      //Serial.print(RPM);
-      //Serial.write(" ECT: ");
-      //Serial.print(CLT/10);
-      //Serial.write(" AFR: ");
-      //Serial.println(float(afr > 0 ? afr/10 : 0));
-      //dtostrf((double)AFR/10,3,2,sprintfbuffer);
-      //Serial.print(sprintfbuffer);
-      //Serial.write(" ");
-      //Serial.println(B_index);
       break;
     case 1521: // 1
       SPKADV=(int)(word(rxmsg.buf[0], rxmsg.buf[1]));
@@ -1066,7 +1007,6 @@ void loop(void) {
       MAP=(int)(word(rxmsg.buf[2], rxmsg.buf[3]));
       MAT=(int)(word(rxmsg.buf[4], rxmsg.buf[5]));
       CLT=(int)(word(rxmsg.buf[6], rxmsg.buf[7]));
-      //ect = ( 256*rxmsg.buf[6] + rxmsg.buf[7])/10;
       break;
     case 1523: // 3
       TPS=(int)(word(rxmsg.buf[0], rxmsg.buf[1]));
@@ -1101,60 +1041,19 @@ void loop(void) {
     case 1574: // 54
       indicator[4]=rxmsg.buf[2]; // cel
       break;
-    default: // unknown/unexpected message; dump it out
-      //hexDump( sizeof(rxmsg), (uint8_t *)&rxmsg );
-      if (rxmsg.ext) {
-        //assume this is a MS CAN protocol packet and decode the header
+    default: // not a broadcast packet
+      if (rxmsg.ext) { //assume this is a normal Megasquirt CAN protocol packet and decode the header
         rxmsg_id.i = rxmsg.id;
         if (rxmsg_id.values.to_id == myCANid) { // is this being sent to us?
-          Serial.print("Type: ");
-          Serial.print(rxmsg_id.values.msg_type);
-          Serial.print(" From: ");
-          Serial.print(rxmsg_id.values.from_id);
-          Serial.print(" To: ");
-          Serial.print(rxmsg_id.values.to_id);
-          Serial.print(" Table: ");
-          Serial.print(rxmsg_id.values.block);
-          Serial.print(" Offset: ");
-          Serial.print(rxmsg_id.values.offset);
-          Serial.println("");
-          binDump(rxmsg.buf[0]);
-          Serial.print(" ");
-          binDump(rxmsg.buf[1]);
-          Serial.print(" ");
-          binDump(rxmsg.buf[2]);
-//Serial.print(" ");
-//binDump(id.b.b0);
-//Serial.println("");
-
-//binDump(id.values.block);
-
-          //Serial.write(" Block: ");
-          //Serial.print(block);
-          //Serial.write(" Offset: ");
-          //Serial.print(offset);
           switch (rxmsg_id.values.msg_type) {
           case 1: // MSG_REQ - request data
             // the data required for the MSG_RSP header is packed into the first 3 data bytes
             msg_req_data.bytes.b0 = rxmsg.buf[0];
             msg_req_data.bytes.b1 = rxmsg.buf[1];
             msg_req_data.bytes.b2 = rxmsg.buf[2];
-            Serial.println("");
-            Serial.print("Req bytes: ");
-            Serial.print(msg_req_data.values.varbyt);
-            Serial.print(" Block: ");
-            Serial.print(msg_req_data.values.varblk);
-            Serial.print(" Offset: ");
-            Serial.println(msg_req_data.values.varoffset);
-            binDump(msg_req_data.values.varbyt);
-            Serial.print(" ");
-            binDump(msg_req_data.values.varblk);
-            Serial.print(" ");
-            binDump(highByte(msg_req_data.values.varoffset));
-            binDump(lowByte(msg_req_data.values.varoffset));
             // Create the tx packet header
             txmsg_id.values.msg_type = 2; // MSG_RSP
-            txmsg_id.values.to_id = msCANid; // MS should always be 0
+            txmsg_id.values.to_id = msCANid; // Megasquirt CAN ID should normally be 0
             txmsg_id.values.from_id = myCANid;
             txmsg_id.values.block = msg_req_data.values.varblk;
             txmsg_id.values.offset = msg_req_data.values.varoffset;
@@ -1162,7 +1061,8 @@ void loop(void) {
             txmsg.id = txmsg_id.i;
             txmsg.len = 8;
             // Use the same block and offset as JBPerf IO expander board for compatibility reasons
-            if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 110) { // realtime clock, 8 bytes expected
+            // Docs at http://www.jbperf.com/io_extender/firmware/0_1_2/io_extender.ini (or latest version)
+            if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 110) { // realtime clock
               /*
                  rtc_sec          = scalar, U08,  110, "", 1,0
                  rtc_min          = scalar, U08,  111, "", 1,0
@@ -1172,17 +1072,18 @@ void loop(void) {
                  rtc_month        = scalar, U08,  115, "", 1,0
                  rtc_year         = scalar, U16,  116, "", 1,0
               */
-              // placeholder until gps hardware is in place. send back hard coded time
-              txmsg.buf[0] = second();
-              txmsg.buf[1] = minute();
-              txmsg.buf[2] = hour();
-              txmsg.buf[3] = 0;
-              txmsg.buf[4] = day();
-              txmsg.buf[5] = month();
-              txmsg.buf[6] = year() / 256;
-              txmsg.buf[7] = year() % 256;
-              // send the message!
-              CANbus.write(txmsg);
+              if (timeStatus() == timeSet) { // only return clock info if the local clock has actually been set (via GPS or RTC)
+                txmsg.buf[0] = second();
+                txmsg.buf[1] = minute();
+                txmsg.buf[2] = hour();
+                txmsg.buf[3] = 0;
+                txmsg.buf[4] = day();
+                txmsg.buf[5] = month();
+                txmsg.buf[6] = year() / 256;
+                txmsg.buf[7] = year() % 256;
+                // send the message!
+                CANbus.write(txmsg);
+              }
             } else if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 128) { // gps1
               /*
                  gps_latdeg       = scalar, S08,  128, "", 1,0
@@ -1249,28 +1150,6 @@ void loop(void) {
               // send the message!
               CANbus.write(txmsg);
             }
-
-            Serial.println("");
-            binDump(txmsg_id.values.to_id);
-            Serial.print(" ");
-            binDump(txmsg_id.values.from_id);
-            Serial.print(" ");
-            binDump(txmsg_id.values.block);
-            Serial.print(" ");
-            binDump(txmsg_id.values.offset);
-            Serial.println("");
-            binDump(txmsg_id.b.b0);
-            Serial.println("");
-            binDump(txmsg_id.b.b1);
-            Serial.println("");
-            binDump(txmsg_id.b.b2);
-            Serial.println("");
-            binDump(txmsg_id.b.b3);
-            Serial.println("");
-            Serial.write(txmsg_id.i);
-            Serial.println("");
-            Serial.print("Response sent! ");
-            hexDump( sizeof(txmsg.buf), (uint8_t *)&txmsg.buf );
             break;
           }
         }
@@ -1278,13 +1157,6 @@ void loop(void) {
         Serial.write("ID: ");
         Serial.print(rxmsg.id);
       }
-      //Serial.write(" Ext: ");
-      //Serial.print(rxmsg.ext);
-      //Serial.write(" Length: ");
-      //Serial.print((int)sizeof(rxmsg.buf));
-      //Serial.write(" Data: ");
-      //hexDump( sizeof(rxmsg.buf), (uint8_t *)&rxmsg.buf );
-      Serial.println("");
 //    case 70: indicator[5]=databuffer[0]; break; // port status
 // this was in the original code, but i can't find it's equivalent in http://www.msextra.com/doc/general/files/Megasquirt_CAN_broadcast_2014-03-10.pdf
 // and it was never used regardless.
@@ -1348,40 +1220,11 @@ void loop(void) {
     Serial.print(" ");
     Serial.println(S_index);
   }
-  /*
-    }
-
-    // insert a time delay between transmissions
-    if ( !txTimer ) {
-      // if frames were received, print the count
-      //if ( rxCount ) {
-      //  Serial.write('=');
-      //  Serial.print(rxCount);
-      //  rxCount = 0;
-      //}
-      txTimer = 100;//milliseconds
-      //msg.len = 8;
-      //msg.id = 0x222;
-      //for( int idx=0; idx<8; ++idx ) {
-      //  msg.buf[idx] = '0'+idx;
-      //}
-      // send 6 at a time to force tx buffering
-      //txCount = 6;
-      digitalWrite(led, 1);
-      //Serial.println(".");
-      //while ( txCount-- ) {
-      //  CANbus.write(msg);
-      //  msg.buf[0]++;
-      //}
-      digitalWrite(led, 0);
-      // time delay to force some rx data queue use
-      rxTimer = 3;//milliseconds
-    }
-  */
 }
 
 void clear() {
-  // update the GPS status
+  // used where display.clearDisplay() would normally be called so that we can make sure certain status
+  // indicators are always shown (GPS, stc)
   display.clearDisplay();
   display.setCursor(116,0);
   display.setTextSize(1);
@@ -1389,7 +1232,6 @@ void clear() {
   display.print(GPS.satellites.value());
   if (gpsLogo)
     display.drawBitmap(100,0, gps, 16, 16, 1);
-  //display.display();
 }
 
 void divby10(int val) {
