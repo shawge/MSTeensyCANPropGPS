@@ -11,6 +11,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Time.h>
+#include <TinyGPS++.h>
+TinyGPSPlus GPS;
 
 #include <Adafruit_NeoPixel.h>
 #define NEOPIN 5
@@ -21,6 +23,11 @@ Encoder myEnc(7, 6); // interrupts on pin6, 7
 #define RBUTTON_INT 15 // pin 15
 const unsigned long debouncing_time = 150; //Debouncing Time - 150 is good, 200 is better, 250 seems worse
 volatile unsigned long last_millis; //switch debouncing
+
+#include <Adafruit_Sensor.h>
+#include <Adafruit_ADXL345_U.h>
+/* Assign a unique ID to this sensor at the same time */
+Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
 // OLED display
 /* Software SPI
@@ -46,10 +53,12 @@ const int myCANid = 10;
 const int msCANid = 0;
 
 // Metro ticks are milliseconds
+Metro gpsTimer = Metro(1000); // display GPS status
 Metro commTimer = Metro(1000); // display an error message if no CAN data during this interval
 Metro displayTimer = Metro(100); // refresh the display at this interval
 Metro ledTimer = Metro(1); // how long to flash the led upon CAN frame receive/transmit
 boolean connectionState = false;
+boolean gpsLogo = false;
 
 int led = 13;
 FlexCAN CANbus(500000);
@@ -655,6 +664,11 @@ const unsigned char ms_logo [] = {
   0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
+const unsigned char gps [] = {
+  0x00, 0x10, 0x00, 0x38, 0x00, 0x7C, 0x00, 0xF8, 0x01, 0xF0, 0x05, 0xE0, 0x00, 0xC0, 0x0C, 0x00,
+  0x1E, 0x90, 0x3E, 0x12, 0x7C, 0x24, 0xF8, 0xC4, 0x70, 0x08, 0x20, 0x30, 0x00, 0x40, 0x00, 0x00
+};
+
 struct MSDataObject {
   char name[10]; // length tbd
   byte block; // max val 32?
@@ -847,11 +861,31 @@ unsigned int accel_x,accel_y,accel_z;
 
 // -------------------------------------------------------------
 void setup(void) {
+  digitalWrite(led, 1);
   SPI.setSCK(14); // alternate clock pin so we can still use the LED
-  setTime(1415515398);
+  //setTime(1415515398);
   CANbus.begin();
   pinMode(led, OUTPUT);
   digitalWrite(led, 1);
+
+  // Init GPS on Serial1
+  Serial1.begin(9600);
+
+  //switch the GPS baud rate to 38400
+  Serial1.write("$PMTK251,38400*27\r\n");
+  //change baud rate of serial port to 38400
+  while (Serial1.available() > 0)
+    Serial.write(Serial1.read());
+  Serial1.flush();
+  delay(10);
+  Serial1.end();
+  Serial1.begin(38400);
+  //This command turns off all NMEA messages except VTG, GGA and GSA. GSA is only sent once every five transmissions.
+  Serial1.write("$PMTK314,0,1,1,1,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2C\r\n");
+  //After sending those commands to the GPS, it is possible to turn on 10Hz update rate.
+  Serial1.write("$PMTK220,100*2F\r\n");
+  //And this time you’ll get
+  //$PMTK001,220,3*30
 
   // set encoder pins as input with internal pull-up resistors enabled
   pinMode(RBUTTON_INT, INPUT);
@@ -874,6 +908,9 @@ void setup(void) {
   display.drawBitmap(0,0, ms_logo, 128, 64, 1);
   display.display(); // show splashscreen
 
+  accel.begin();
+  accel.setRange(ADXL345_RANGE_4_G); // 2,4,8,16g are valid
+
   delay(1000);
   //Serial.println(F("Hello Teensy 3.1 CAN Test."));
   digitalWrite(led, 0);
@@ -886,15 +923,80 @@ void loop(void) {
     digitalWrite(led, 0);
     ledTimer.reset();
   }
+  // Handle GPS data
+
+  bool nmeaReceived = false;
+  while (!nmeaReceived && (Serial1.available() > 0)) {
+    nmeaReceived = GPS.encode(Serial1.read());
+  }
+
+  //while(Serial1.available())
+  //Serial.write(Serial1.read());
+  if (GPS.location.isUpdated()) {
+    // Read GPS data using gps.location.lat() etc.
+    /*
+    Serial.print(F("LOCATION   Fix Age="));
+      Serial.print(GPS.location.age());
+      Serial.print(F("ms Raw Lat="));
+      Serial.print(GPS.location.rawLat().negative ? "-" : "+");
+      Serial.print(GPS.location.rawLat().deg);
+      Serial.print("[+");
+      Serial.print(GPS.location.rawLat().billionths);
+      Serial.print(F(" billionths],  Raw Long="));
+      Serial.print(GPS.location.rawLng().negative ? "-" : "+");
+      Serial.print(GPS.location.rawLng().deg);
+      Serial.print("[+");
+      Serial.print(GPS.location.rawLng().billionths);
+      Serial.print(F(" billionths],  Lat="));
+      Serial.print(GPS.location.lat(), 6);
+      Serial.print(F(" Long="));
+      Serial.println(GPS.location.lng(), 6);
+    */
+    if (GPS.time.age() < 500) {
+      setTime(GPS.time.hour(), GPS.time.minute(), GPS.time.second(), GPS.date.day(), GPS.date.month(), GPS.date.year());
+      //Serial.println(hour());
+      adjustTime(-8 * SECS_PER_HOUR);
+    }
+    /*
+    //  }
+      //if ((GPS.date.isUpdated() || GPS.time.isUpdated()) && (GPS.date.age() < 500 || GPS.time.age() < 500)) {
+
+        //Serial.print((int)GPS.time.value() / 1000);
+          Serial.print(hour());
+          Serial.print(":");
+      Serial.print(minute());
+      Serial.print(":");
+      Serial.print(second());
+      Serial.print(" ");
+      Serial.print(day());
+      Serial.print(" ");
+      Serial.print(month());
+      Serial.print(" ");
+      Serial.print(year());
+      Serial.println();
+    */
+  }
   if (commTimer.check()) { // see if we have gotten any CAN messages in the last second. display an error if not
-    display.clearDisplay();
+    clear();
     display.setTextSize(1);
     display.setTextColor(WHITE);
-    display.setCursor(0,0);
+    display.setCursor(0,56);
     display.println("Waiting for data...");
+    display.setCursor(0,16);
+    display.println(GPS.location.lat(),6);
+    display.println(GPS.location.rawLat().minutes);
+    display.println((GPS.location.rawLat().billionths * 3 / 50000) - GPS.location.rawLat().minutes * 1000);
     display.display();
     commTimer.reset();
     connectionState = false;
+  }
+  if (gpsTimer.check()) {
+    if (GPS.satellites.value()) {
+      gpsLogo = true;
+    } else {
+      gpsLogo = gpsLogo ^ 1;
+    }
+    gpsTimer.reset();
   }
   if (connectionState && displayTimer.check()) { // otherwise, update the display and send any CAN broadcasts
     R_index=myEnc.read()/4;
@@ -929,6 +1031,7 @@ void loop(void) {
     display.display();
     displayTimer.reset();
   }
+
   // if not time-delayed, read CAN messages and print 1st byte
   //if ( !rxTimer ) {
   if ( CANbus.read(rxmsg) ) {
@@ -1089,41 +1192,52 @@ void loop(void) {
                  gps_lonmin       = scalar, U08,  133, "", 1,0
                  gps_lonmmin      = scalar, U16,  134, "", 1,0
               */
-              txmsg.buf[0] = 0;
-              txmsg.buf[1] = 0;
-              txmsg.buf[2] = 0;
-              txmsg.buf[3] = 0;
-              txmsg.buf[4] = 0;
-              txmsg.buf[5] = 0;
-              txmsg.buf[6] = 0;
-              txmsg.buf[7] = 0;
+              signed char latdeg;
+              unsigned char latmin,lonmin,londeg;
+              unsigned int latmmin,lonmmin;
+              latdeg, londeg, latmin, lonmin, latmmin, lonmmin = 0;
+              latdeg = GPS.location.rawLat().negative ? 0 - GPS.location.rawLat().deg : GPS.location.rawLat().deg;
+              latmin = GPS.location.rawLat().minutes;
+              latmmin = (GPS.location.rawLat().billionths * 3 / 50000) - GPS.location.rawLat().minutes * 1000;
+              //londeg = GPS.location.rawLng().negative ? 360 + GPS.location.rawLng().deg : GPS.location.rawLng().deg;
+              londeg = GPS.location.rawLng().deg;
+              lonmin = GPS.location.rawLng().minutes;
+              lonmmin = (GPS.location.rawLng().billionths * 3 / 50000) - GPS.location.rawLng().minutes * 1000;
+              txmsg.buf[0] = latdeg;
+              txmsg.buf[1] = latmin;
+              txmsg.buf[2] = latmmin / 256;
+              txmsg.buf[3] = latmmin % 256;
+              txmsg.buf[4] = londeg;
+              txmsg.buf[5] = lonmin;
+              txmsg.buf[6] = lonmmin / 256;
+              txmsg.buf[7] = lonmmin % 256;
               // send the message!
               CANbus.write(txmsg);
             } else if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 136) { // gps2
               /*
-                 gps_lonEW        = scalar, U08,  136, "", 1,0
+                 gps_lonEW        = scalar, U08,  136, "", 1,0 // bit 0 = E/W
                  gps_altk         = scalar, S08,  137, "", 1,0
                  gps_altm         = scalar, S16,  138, "", 0.1,0
                  gps_speedkm      = scalar, U16,  140, "", 0.1,0
                  gps_course       = scalar, U16,  142, "", 0.1,0
-                 gps_speed        = scalar, U16,  144, "", 0.1,0
               */
-              txmsg.buf[0] = 0;
-              txmsg.buf[1] = 0;
-              txmsg.buf[2] = 0;
-              txmsg.buf[3] = 0;
-              txmsg.buf[4] = 0;
-              txmsg.buf[5] = 0;
-              txmsg.buf[6] = 0;
-              txmsg.buf[7] = 0;
+              txmsg.buf[0] = GPS.location.rawLng().negative ? 1 : 0;
+              txmsg.buf[1] = GPS.altitude.kilometers();
+              txmsg.buf[2] = GPS.altitude.meters() * 10 / 256;
+              txmsg.buf[3] = (int)GPS.altitude.meters() * 10 % 256;
+              txmsg.buf[4] = GPS.speed.kmph() / 256;
+              txmsg.buf[5] = (int)GPS.speed.kmph() % 256;
+              txmsg.buf[6] = GPS.course.deg() / 256;
+              txmsg.buf[7] = (int)GPS.course.deg() % 256;
               // send the message!
               CANbus.write(txmsg);
             } else if (rxmsg_id.values.block == 7 && rxmsg_id.values.offset == 2) { // ADC 1-4 - accelerometer
-
-              accel_x = 100;
-              accel_y = 200;
-              accel_z = 300;
-              //txmsg.id = 1100;
+              sensors_event_t event;
+              accel.getEvent(&event);
+              // normalize +/- 4G to a 12 bit unsigned int value
+              accel_x = (event.acceleration.x / 9.8 * 1023) + 2047;
+              accel_y = (event.acceleration.y / 9.8 * 1023) + 2047;
+              accel_z = (event.acceleration.z / 9.8 * 1023) + 2047;
               txmsg.buf[0] = accel_x / 256;
               txmsg.buf[1] = accel_x % 256;
               txmsg.buf[2] = accel_y / 256;
@@ -1131,7 +1245,7 @@ void loop(void) {
               txmsg.buf[4] = accel_z / 256;
               txmsg.buf[5] = accel_z % 256;
               txmsg.buf[6] = 0;
-              txmsg.buf[7] = 62;
+              txmsg.buf[7] = 0;
               // send the message!
               CANbus.write(txmsg);
             }
@@ -1191,10 +1305,10 @@ void loop(void) {
       // press button
       //void ISR_debounce () {
 //if((long)(millis() - last_millis) >= (debouncing_time * 10)) {
-      display.clearDisplay();
+      clear();
       if (S_index != 0) {
         S_index=0; // deselect brightness
-        display.clearDisplay();
+        clear();
         return;
       }
       if (B_index < 5) {
@@ -1266,6 +1380,18 @@ void loop(void) {
   */
 }
 
+void clear() {
+  // update the GPS status
+  display.clearDisplay();
+  display.setCursor(116,0);
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.print(GPS.satellites.value());
+  if (gpsLogo)
+    display.drawBitmap(100,0, gps, 16, 16, 1);
+  //display.display();
+}
+
 void divby10(int val) {
   byte length;
 
@@ -1279,10 +1405,10 @@ void divby10(int val) {
 
 void ISR_debounce () { // interrupt handler for the encoder button
   if((long)(millis() - last_millis) >= (debouncing_time * 10)) {
-    display.clearDisplay();
+    clear();
     if (S_index != 0) {
       S_index=0; // deselect brightness
-      display.clearDisplay();
+      clear();
       return;
     }
     if (B_index < 4) {
@@ -1320,7 +1446,7 @@ void gauge_histogram() {
   val = AFR - 100; // temporary
 
   if (millis() > (validity_window + 80)) { // 10hz update time
-    display.clearDisplay();
+    clear();
 
     if (R_index > 2 || R_index < 0) {
       R_index=0;
@@ -1425,7 +1551,7 @@ void gauge_warning() {
   byte dlength, llength;
   int midpos;
 
-  display.clearDisplay();
+  clear();
 
   if (RPM > 6800) {
     dlength=4;
@@ -1605,7 +1731,7 @@ void gauge_warning() {
 
 
 void gauge_debug() {
-  display.clearDisplay();
+  clear();
   display.setCursor(32,0);
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -1626,7 +1752,7 @@ void gauge_vitals() {
   // size 1 .. 5 x 7
   // size 2 .. 10 x 14
   //Vitals - AFR, RPM, MAP,
-  display.clearDisplay();
+  clear();
 
 //  display.drawLine(63, 0, 63, 55, WHITE); //vert centerline
 //  display.drawLine(0, 31, 127, 31, WHITE); //horiz centerline
@@ -1812,7 +1938,7 @@ void gauge_single() {
   char data[10];
   String label;
   byte temp_index;
-  display.clearDisplay();
+  clear();
 //  unsigned int RPM, CLT, MAP, MAT, SPKADV, BATTV, TPS, Knock, Baro, EGOc, IAC, dwell, bstduty, idle_tar;
 //  int AFR, AFRtgt;
   if (R_index < 0) {
@@ -2063,7 +2189,7 @@ void gauge_menu() {
   }
 
   display.setTextColor(WHITE);
-  display.clearDisplay();
+  clear();
   display.setCursor(0,0);
   display.setTextSize(2);
 
@@ -2144,7 +2270,7 @@ void gauge_menu() {
 
   if (S_index == 1) {
     neo_brightness=R_index;
-    display.clearDisplay();
+    clear();
     display.setCursor(0,0);
     if (R_index > 8) {
       R_index = 8;
@@ -2205,7 +2331,7 @@ void gauge_menu() {
 void gauge_danger() {
   display.setTextSize(2);
   display.setTextColor(WHITE);
-  display.clearDisplay();
+  clear();
   display.setCursor(0,0);
 
   display.setCursor(4,0);
