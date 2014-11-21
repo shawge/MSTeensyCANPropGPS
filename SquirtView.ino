@@ -1098,12 +1098,11 @@ void loop(void) {
               unsigned int latmmin,lonmmin;
               latdeg, londeg, latmin, lonmin, latmmin, lonmmin = 0;
               latdeg = GPS.location.rawLat().negative ? 0 - GPS.location.rawLat().deg : GPS.location.rawLat().deg;
-              latmin = GPS.location.rawLat().minutes;
-              latmmin = (GPS.location.rawLat().billionths * 3 / 50000) - GPS.location.rawLat().minutes * 1000;
-              //londeg = GPS.location.rawLng().negative ? 360 + GPS.location.rawLng().deg : GPS.location.rawLng().deg;
+              latmin = (GPS.location.lat()-GPS.location.rawLat().deg)*60;
+              latmmin = (GPS.location.rawLat().billionths * 3 / 50000) - latmin * 1000;
               londeg = GPS.location.rawLng().deg;
-              lonmin = GPS.location.rawLng().minutes;
-              lonmmin = (GPS.location.rawLng().billionths * 3 / 50000) - GPS.location.rawLng().minutes * 1000;
+              latmin = (GPS.location.lng()-GPS.location.rawLng().deg)*60;
+              latmmin = (GPS.location.rawLng().billionths * 3 / 50000) - lonmin * 1000;
               txmsg.buf[0] = latdeg;
               txmsg.buf[1] = latmin;
               txmsg.buf[2] = latmmin / 256;

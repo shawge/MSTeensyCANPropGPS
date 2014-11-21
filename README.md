@@ -20,6 +20,6 @@ engine controller (http://www.msextra.com/) via CAN bus. Data is both received f
 * [Adafruit sensor lib](https://github.com/adafruit/Adafruit_Sensor) - required by accelerometer lib
 * [SSD1306](https://www.pjrc.com/teensy/arduino_libraries/Adafruit_SSD1306.zip) - OLED display
 * [Adafruit GFX](https://github.com/adafruit/Adafruit-GFX-Library) - required by SSD1306
-* [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus) - GPS -- I am using a modified one, will fork it soon
+* [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus) - GPS
 * [Neopixel](https://github.com/adafruit/Adafruit_NeoPixel) - LED ring
 * [Encoder](https://www.pjrc.com/teensy/arduino_libraries/Encoder.zip) - rotary encoder
