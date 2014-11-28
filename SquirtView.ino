@@ -14,9 +14,10 @@
 #include <TinyGPS++.h>
 TinyGPSPlus GPS;
 
-#include <Adafruit_NeoPixel.h>
-#define NEOPIN 5
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(16, NEOPIN, NEO_GRB + NEO_KHZ800);
+#include <FastLED.h>
+#define LEDPIN 5
+#define NUMLEDS 16
+CRGB leds[NUMLEDS];
 
 #include <Encoder.h>
 Encoder myEnc(7, 6); // interrupts on pin6, 7
@@ -859,6 +860,18 @@ byte histogram_index;
 
 unsigned int accel_x,accel_y,accel_z;
 
+// touch "buttons"
+int btnA,btnB,btnC;
+int btnA_init,btnB_init,btnC_init;
+int btnA_last,btnB_last,btnC_last;
+
+struct btn {
+  unsigned int last:1;
+  int init;
+  int value;
+};
+
+btn buttons[3];
 // -------------------------------------------------------------
 void setup(void) {
   digitalWrite(led, 1);
@@ -874,8 +887,6 @@ void setup(void) {
   //switch the GPS baud rate to 38400
   Serial1.write("$PMTK251,38400*27\r\n");
   //change baud rate of serial port to 38400
-  while (Serial1.available() > 0)
-    Serial.write(Serial1.read());
   Serial1.flush();
   delay(10);
   Serial1.end();
@@ -892,15 +903,8 @@ void setup(void) {
   digitalWrite(RBUTTON_INT, HIGH);
   attachInterrupt(RBUTTON_INT, ISR_debounce, FALLING);
 
-  strip.begin();
-  // For a set of NeoPixels the first NeoPixel is 0, second is 1, all the way up to the count of pixels minus one.
-  for(int i=0; i<16; i++) {
-    // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
-    strip.setPixelColor(i, strip.Color(0,0,0)); // Moderately bright green color.
-    strip.show(); // This sends the updated pixel color to the hardware.
-    //delay(delayval); // Delay for a period of time (in milliseconds).
-  }
-  strip.show();
+
+  FastLED.show();
   // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
   display.begin(SSD1306_SWITCHCAPVCC);
   // init done
@@ -911,6 +915,32 @@ void setup(void) {
   accel.begin();
   accel.setRange(ADXL345_RANGE_4_G); // 2,4,8,16g are valid
 
+  /*
+    // calibrate touch "buttons"
+    for (int i=0; i<10; i++) {
+      for (int j=0; j<3; j++) {
+        buttons[j].init += touchRead(15 + j);
+      }
+      //btnA_init += touchRead(15);
+      //btnB_init += touchRead(16);
+      //btnC_init += touchRead(17);
+      delay(100);
+    }
+    buttons[0].init /= 10;
+    buttons[1].init /= 10;
+    buttons[2].init /= 10;
+    */
+
+  FastLED.addLeds<WS2812, LEDPIN>(leds, NUMLEDS);
+  // For a set of NeoPixels the first NeoPixel is 0, second is 1, all the way up to the count of pixels minus one.
+  fill_rainbow(leds, NUMLEDS, 0, 255/16);
+  for(int i=0; i<16; i++) {
+    // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
+    //leds[i].setRGB(0,0,25); // initialize led ring
+    //FastLED.show(); // This sends the updated pixel color to the hardware.
+    //delay(delayval); // Delay for a period of time (in milliseconds).
+  }
+  FastLED.show();
   delay(1000);
   //Serial.println(F("Hello Teensy 3.1 CAN Test."));
   digitalWrite(led, 0);
@@ -942,6 +972,11 @@ void loop(void) {
     display.setTextColor(WHITE);
     display.setCursor(0,56);
     display.println("Waiting for data...");
+    display.setCursor(0,0);
+    display.println(GPS.time.age());
+    display.println(GPS.location.isUpdated());
+    display.println(GPS.location.lat(),5);
+    display.println(GPS.location.lng(),5);
     display.display();
     commTimer.reset();
     connectionState = false;
@@ -954,6 +989,24 @@ void loop(void) {
     }
     gpsTimer.reset();
   }
+  /* touchRead() can take up to 5ms to do its thing, so this is useless..
+  if (0 && displayTimer.check()) { // read the buttons
+    for (int i=0; i<3; i++) {
+      if (touchRead(15 + i) - buttons[i].init > 1000) { // button is pressed
+        if (buttons[i].last == 0) { // button was not pressed during last loop, register a "click"
+          switch (i) {
+            case 0: R_index++; break;
+            case 1: ISR_debounce(); break;
+            case 2: R_index--; break;
+          }
+        }
+        buttons[i].last = 1;
+      } else {
+        buttons[i].last = 0;
+      }
+    }
+  }
+  */
   if (connectionState && displayTimer.check()) { // main display routine
     R_index=myEnc.read()/4;
     if (! value_oob() ) {
@@ -982,7 +1035,7 @@ void loop(void) {
 
     } else {
       gauge_warning();
-      strip.show();
+      FastLED.show();
     }
     display.display();
     displayTimer.reset();
@@ -1226,12 +1279,14 @@ void clear() {
   // used where display.clearDisplay() would normally be called so that we can make sure certain status
   // indicators are always shown (GPS, stc)
   display.clearDisplay();
-  display.setCursor(116,0);
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.print(GPS.satellites.value());
-  if (gpsLogo)
-    display.drawBitmap(100,0, gps, 16, 16, 1);
+  if (B_index == 0) { // there is no room for the GPS status on other than the main screen
+    display.setCursor(116,0);
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.print(GPS.satellites.value());
+    if (gpsLogo)
+      display.drawBitmap(100,0, gps, 16, 16, 1);
+  }
 }
 
 void divby10(int val) {
@@ -1409,18 +1464,18 @@ void gauge_warning() {
     display.print("RPM");
 
     for (byte i = 0; i < 16; i++) {
-      strip.setPixelColor(i, 0, 0, 0);
+      leds[i].setRGB(0, 0, 0);
     } // zero out
 
     byte i = ((RPM - 6800) / 50);
 
     for (byte p=0; p < i; p++) {
       if (i <= 2) {
-        strip.setPixelColor(p + 14, ((255 * neo_brightness) / 16), 0, 0);
+        leds[p+14].setRGB(((255 * neo_brightness) / 16), 0, 0);
       } else {
-        strip.setPixelColor(14, ((255 * neo_brightness) / 16), 0, 0);
-        strip.setPixelColor(15, ((255 * neo_brightness) / 16), 0, 0);
-        strip.setPixelColor(p-2, ((255 * neo_brightness) / 16), 0, 0);
+        leds[14].setRGB(((255 * neo_brightness) / 16), 0, 0);
+        leds[15].setRGB(((255 * neo_brightness) / 16), 0, 0);
+        leds[p-2].setRGB(((255 * neo_brightness) / 16), 0, 0);
       }
     }
 
@@ -1585,6 +1640,21 @@ void gauge_debug() {
   display.print(S_index);
   display.print("b");
   display.println(B_index);
+  signed char latdeg;
+  unsigned char latmin,lonmin,londeg;
+  unsigned int latmmin,lonmmin;
+  double intpart;
+  latdeg, londeg, latmin, lonmin, latmmin, lonmmin = 0;
+  latdeg = GPS.location.rawLat().negative ? 0 - GPS.location.rawLat().deg : GPS.location.rawLat().deg;
+  latmin = (GPS.location.lat()-GPS.location.rawLat().deg)*60;
+  latmmin = (GPS.location.rawLat().billionths * 3 / 50000) - latmin * 1000;
+  londeg = GPS.location.rawLng().deg;
+  lonmin = modf(abs(GPS.location.lng()),&intpart)*60,3;
+  lonmmin = (GPS.location.rawLng().billionths * 3 / 50000) - lonmin * 1000;
+  display.println(GPS.location.lng(),5);
+  display.println(modf(abs(GPS.location.lng()),&intpart)*60,3);
+  display.println(lonmin);
+  display.println(lonmmin);
   display.setTextSize(2);
 }
 
@@ -2212,29 +2282,29 @@ void neogauge(int val, byte led, byte enable_warning) {
 
   if ( val > 500 ) {
     if (enable_warning > 0) {
-      strip.setPixelColor(led, 0, 0, 0);
-      strip.show();
+      leds[led].setRGB(0, 0, 0);
+      FastLED.show();
       delay(50);
       red = (255 * neo_brightness) / 16;
-      strip.setPixelColor(led, red, 0, 0);
-      strip.show();
+      leds[led].setRGB(red, 0, 0);
+      FastLED.show();
     } else {
       red = (255 * neo_brightness) / 16;
-      strip.setPixelColor(led, red, 0, 0);
-      strip.show();
+      leds[led].setRGB(red, 0, 0);
+      FastLED.show();
     }
   } else if ( val < 0 ) {
     if (enable_warning > 0) {
-      strip.setPixelColor(led, 0, 0, 0);
-      strip.show();
+      leds[led].setRGB(0, 0, 0);
+      FastLED.show();
       delay(50);
       blue = (255 * neo_brightness) / 16;
-      strip.setPixelColor(led, 0, 0, blue);
-      strip.show();
+      leds[led].setRGB(0, 0, blue);
+      FastLED.show();
     } else {
       blue = (255 * neo_brightness) / 16;
-      strip.setPixelColor(led, 0, 0, blue);
-      strip.show();
+      leds[led].setRGB(0, 0, blue);
+      FastLED.show();
     }
   } else if ((val >= 0) && (val <= 500)) {
     red =   pgm_read_byte (&ledarray[val].r0);
@@ -2243,8 +2313,8 @@ void neogauge(int val, byte led, byte enable_warning) {
     red = (red * neo_brightness) / 16;
     green = (green * neo_brightness) / 16;
     blue = (blue * neo_brightness) / 16;
-    strip.setPixelColor(led, red, green, blue);
-//    strip.show();
+    leds[led].setRGB(red, green, blue);
+//    FastLED.show();
   }
 }
 
@@ -2254,48 +2324,48 @@ void neogauge4led(int val, byte led0, byte led1, byte led2, byte led3, byte enab
 
   if ( val > 500 ) {
     if (enable_warning > 0) {
-      strip.setPixelColor(led0, 0, 0, 0);
-      strip.setPixelColor(led1, 0, 0, 0);
-      strip.setPixelColor(led2, 0, 0, 0);
-      strip.setPixelColor(led3, 0, 0, 0);
-      strip.show();
+      leds[led0].setRGB(0, 0, 0);
+      leds[led1].setRGB(0, 0, 0);
+      leds[led2].setRGB(0, 0, 0);
+      leds[led3].setRGB(0, 0, 0);
+      FastLED.show();
       delay(50);
       red = (255 * neo_brightness) / 16;
-      strip.setPixelColor(led0, red, 0, 0);
-      strip.setPixelColor(led1, red, 0, 0);
-      strip.setPixelColor(led2, red, 0, 0);
-      strip.setPixelColor(led3, red, 0, 0);
-      strip.show();
+      leds[led0].setRGB(red, 0, 0);
+      leds[led1].setRGB(red, 0, 0);
+      leds[led2].setRGB(red, 0, 0);
+      leds[led3].setRGB(red, 0, 0);
+      FastLED.show();
     } else {
       red = (255 * neo_brightness) / 16;
-      strip.setPixelColor(led0, red, 0, 0);
-      strip.setPixelColor(led1, red, 0, 0);
-      strip.setPixelColor(led2, red, 0, 0);
-      strip.setPixelColor(led3, red, 0, 0);
-      strip.show();
+      leds[led0].setRGB(red, 0, 0);
+      leds[led1].setRGB(red, 0, 0);
+      leds[led2].setRGB(red, 0, 0);
+      leds[led3].setRGB(red, 0, 0);
+      FastLED.show();
     }
 
   } else if ( val < 0 ) {
     if (enable_warning > 0) {
-      strip.setPixelColor(led0, 0, 0, 0);
-      strip.setPixelColor(led1, 0, 0, 0);
-      strip.setPixelColor(led2, 0, 0, 0);
-      strip.setPixelColor(led3, 0, 0, 0);
-      strip.show();
+      leds[led0].setRGB(0, 0, 0);
+      leds[led1].setRGB(0, 0, 0);
+      leds[led2].setRGB(0, 0, 0);
+      leds[led3].setRGB(0, 0, 0);
+      FastLED.show();
       delay(50);
       blue = (255 * neo_brightness) / 16;
-      strip.setPixelColor(led0, 0, 0, blue);
-      strip.setPixelColor(led1, 0, 0, blue);
-      strip.setPixelColor(led2, 0, 0, blue);
-      strip.setPixelColor(led3, 0, 0, blue);
-      strip.show();
+      leds[led0].setRGB(0, 0, blue);
+      leds[led1].setRGB(0, 0, blue);
+      leds[led2].setRGB(0, 0, blue);
+      leds[led3].setRGB(0, 0, blue);
+      FastLED.show();
     } else {
       blue = (255 * neo_brightness) / 16;
-      strip.setPixelColor(led0, 0, 0, blue);
-      strip.setPixelColor(led1, 0, 0, blue);
-      strip.setPixelColor(led2, 0, 0, blue);
-      strip.setPixelColor(led3, 0, 0, blue);
-      strip.show();
+      leds[led0].setRGB(0, 0, blue);
+      leds[led1].setRGB(0, 0, blue);
+      leds[led2].setRGB(0, 0, blue);
+      leds[led3].setRGB(0, 0, blue);
+      FastLED.show();
     }
   } else {
     red   = pgm_read_byte (&ledarray[(val)].r0);
@@ -2304,7 +2374,7 @@ void neogauge4led(int val, byte led0, byte led1, byte led2, byte led3, byte enab
     red = (red * neo_brightness) / 16;
     green = (green * neo_brightness) / 16;
     blue = (blue * neo_brightness) / 16;
-    strip.setPixelColor(led0, red, green, blue);
+    leds[led0].setRGB(red, green, blue);
 
     red   = pgm_read_byte (&ledarray[(val)].r1);
     green = pgm_read_byte (&ledarray[(val)].g1);
@@ -2312,7 +2382,7 @@ void neogauge4led(int val, byte led0, byte led1, byte led2, byte led3, byte enab
     red = (red * neo_brightness) / 16;
     green = (green * neo_brightness) / 16;
     blue = (blue * neo_brightness) / 16;
-    strip.setPixelColor(led1, red, green, blue);
+    leds[led1].setRGB(red, green, blue);
 
     red   = pgm_read_byte (&ledarray[(val)].r2);
     green = pgm_read_byte (&ledarray[(val)].g2);
@@ -2320,7 +2390,7 @@ void neogauge4led(int val, byte led0, byte led1, byte led2, byte led3, byte enab
     red = (red * neo_brightness) / 16;
     green = (green * neo_brightness) / 16;
     blue = (blue * neo_brightness) / 16;
-    strip.setPixelColor(led2, red, green, blue);
+    leds[led2].setRGB(red, green, blue);
 
     red   = pgm_read_byte (&ledarray[(val)].r3);
     green = pgm_read_byte (&ledarray[(val)].g3);
@@ -2328,9 +2398,9 @@ void neogauge4led(int val, byte led0, byte led1, byte led2, byte led3, byte enab
     red = (red * neo_brightness) / 16;
     green = (green * neo_brightness) / 16;
     blue = (blue * neo_brightness) / 16;
-    strip.setPixelColor(led3, red, green, blue);
+    leds[led3].setRGB(red, green, blue);
 
-//    strip.show();
+//    FastLED.show();
   }
 }
 
@@ -2368,13 +2438,13 @@ void write_neopixel() {
   temp=((AFR - AFRtgt) * 50) + 500;
   neogauge(temp, 13, 0);
 
-  strip.setPixelColor(3, 0, 0, 0); // unallocated
-  strip.setPixelColor(5, 0, 0, 0);
-  strip.setPixelColor(7, 0, 0, 0);
+  leds[3].setRGB(0, 0, 0); // unallocated
+  leds[5].setRGB(0, 0, 0);
+  leds[7].setRGB(0, 0, 0);
 
-  strip.show();
+  FastLED.show();
 
 //todo: oil temp, oil pressure, EGT
 //todo: rearrange LED's into something nicer
-//todo: might be faster to do a final strip.show here instead of inside the neogauge functions
+//todo: might be faster to do a final FastLED.show here instead of inside the neogauge functions
 }
