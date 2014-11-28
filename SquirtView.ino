@@ -4,6 +4,11 @@
   Many thanks to that project, as I would not have gotten started without it.
 */
 
+// User configuerable variables
+const int myCANid = 10; // CAN ID of this unit
+const int msCANid = 0; // CAN ID of the Megasquirt (should almost always be 0)
+const int REVLIMIT = 6800; // soft rev limit at which to start blinking the tach gauge
+
 #include <Metro.h>
 #include <FlexCAN.h>
 #include <SPI.h>
@@ -50,16 +55,15 @@ Adafruit_SSD1306 display(OLED_DC, OLED_RESET, OLED_CS);
 #error("Height incorrect, please fix Adafruit_SSD1306.h!");
 #endif
 
-const int myCANid = 10;
-const int msCANid = 0;
-
 // Metro ticks are milliseconds
 Metro gpsTimer = Metro(1000); // display GPS status
 Metro commTimer = Metro(1000); // display an error message if no CAN data during this interval
 Metro displayTimer = Metro(100); // refresh the display at this interval
 Metro ledTimer = Metro(1); // how long to flash the led upon CAN frame receive/transmit
+Metro gaugeBlinkTimer = Metro(100); // blink the led ring pixels during certain conditions
 boolean connectionState = false;
 boolean gpsLogo = false;
+boolean gaugeBlink = false;
 
 int led = 13;
 FlexCAN CANbus(500000);
@@ -777,7 +781,7 @@ byte B_index = 0; // Button increment
 byte M_index = 0; // Menu increment
 byte S_index = 0; // Select increment
 
-byte neo_brightness = 1;
+byte neo_brightness = 4;
 byte g_textsize = 1;
 char tempchars[11];
 
@@ -931,14 +935,11 @@ void setup(void) {
     buttons[2].init /= 10;
     */
 
-  FastLED.addLeds<WS2812, LEDPIN>(leds, NUMLEDS);
+  FastLED.addLeds<NEOPIXEL, LEDPIN>(leds, NUMLEDS);
   // For a set of NeoPixels the first NeoPixel is 0, second is 1, all the way up to the count of pixels minus one.
-  fill_rainbow(leds, NUMLEDS, 0, 255/16);
+  //fill_rainbow(leds, NUMLEDS, 0, 255/16);
   for(int i=0; i<16; i++) {
-    // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
-    //leds[i].setRGB(0,0,25); // initialize led ring
-    //FastLED.show(); // This sends the updated pixel color to the hardware.
-    //delay(delayval); // Delay for a period of time (in milliseconds).
+    leds[i].setRGB(16,16,16); // initialize led ring
   }
   FastLED.show();
   delay(1000);
@@ -953,6 +954,11 @@ void loop(void) {
     digitalWrite(led, 0);
     ledTimer.reset();
   }
+  if (gaugeBlinkTimer.check()) {
+    gaugeBlink = gaugeBlink ^ 1;
+    gaugeBlinkTimer.reset();
+  }
+
   // Handle GPS data
 
   bool nmeaReceived = false;
@@ -978,6 +984,10 @@ void loop(void) {
     display.println(GPS.location.lat(),5);
     display.println(GPS.location.lng(),5);
     display.display();
+    for(int i=0; i<16; i++) {
+      leds[i].setRGB(0,0,0); // initialize led ring
+    }
+    FastLED.show();
     commTimer.reset();
     connectionState = false;
   }
@@ -1440,7 +1450,7 @@ boolean value_oob() {
     return false;
   }
   if ( bitRead(indicator[2],6) == 1) return true; // overboost
-  if (RPM > 6800) return true;
+  //if (RPM > 6800) return true;
   return false;
 }
 
@@ -2323,49 +2333,31 @@ void neogauge4led(int val, byte led0, byte led1, byte led2, byte led3, byte enab
   val = val/2;
 
   if ( val > 500 ) {
-    if (enable_warning > 0) {
+    if (enable_warning > 0 && !gaugeBlink) {
       leds[led0].setRGB(0, 0, 0);
       leds[led1].setRGB(0, 0, 0);
       leds[led2].setRGB(0, 0, 0);
       leds[led3].setRGB(0, 0, 0);
-      FastLED.show();
-      delay(50);
-      red = (255 * neo_brightness) / 16;
-      leds[led0].setRGB(red, 0, 0);
-      leds[led1].setRGB(red, 0, 0);
-      leds[led2].setRGB(red, 0, 0);
-      leds[led3].setRGB(red, 0, 0);
-      FastLED.show();
     } else {
       red = (255 * neo_brightness) / 16;
       leds[led0].setRGB(red, 0, 0);
       leds[led1].setRGB(red, 0, 0);
       leds[led2].setRGB(red, 0, 0);
       leds[led3].setRGB(red, 0, 0);
-      FastLED.show();
     }
 
   } else if ( val < 0 ) {
-    if (enable_warning > 0) {
+    if (enable_warning > 0 && !gaugeBlink) {
       leds[led0].setRGB(0, 0, 0);
       leds[led1].setRGB(0, 0, 0);
       leds[led2].setRGB(0, 0, 0);
       leds[led3].setRGB(0, 0, 0);
-      FastLED.show();
-      delay(50);
-      blue = (255 * neo_brightness) / 16;
-      leds[led0].setRGB(0, 0, blue);
-      leds[led1].setRGB(0, 0, blue);
-      leds[led2].setRGB(0, 0, blue);
-      leds[led3].setRGB(0, 0, blue);
-      FastLED.show();
     } else {
       blue = (255 * neo_brightness) / 16;
       leds[led0].setRGB(0, 0, blue);
       leds[led1].setRGB(0, 0, blue);
       leds[led2].setRGB(0, 0, blue);
       leds[led3].setRGB(0, 0, blue);
-      FastLED.show();
     }
   } else {
     red   = pgm_read_byte (&ledarray[(val)].r0);
@@ -2399,8 +2391,6 @@ void neogauge4led(int val, byte led0, byte led1, byte led2, byte led3, byte enab
     green = (green * neo_brightness) / 16;
     blue = (blue * neo_brightness) / 16;
     leds[led3].setRGB(red, green, blue);
-
-//    FastLED.show();
   }
 }
 
@@ -2410,8 +2400,8 @@ void write_neopixel() {
 //  void neogauge4led(int val, byte led0, byte led1, byte led2, byte led3)
 //  void neogauge(int val, byte led)
 
-  temp = (RPM * 5) / 38;
-  neogauge4led(temp, 1, 0, 15, 14, 1); // RPM min 0 max 7600
+  temp = (RPM * 1000) / REVLIMIT;
+  neogauge4led(temp, 1, 0, 15, 14, 1); // RPM min 0 max REVLIMIT
 
   temp = ((AFR * 2) * 100) / 59;
   if (AFR <= 147) {
