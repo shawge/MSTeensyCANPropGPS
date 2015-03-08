@@ -23,3 +23,16 @@ engine controller (http://www.msextra.com/) via CAN bus. Data is both received f
 * [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus) - GPS
 * [FastLED](https://github.com/FastLED/FastLED) - LED ring
 * [Encoder](https://www.pjrc.com/teensy/arduino_libraries/Encoder.zip) - rotary encoder
+
+## Component BOM
+Passives are 1206 package unless otherwise noted.
+* R1 - 10K
+* R2 - 120 ohm
+* R3 - 10K (only required for headlight sense)
+* R4 - 4K (only required for headlight sense)
+* C1 - 10uF
+* IC1 - SN65HVD230 (or similar) CAN transceiver
+* VR1 - Recom R-78 5V switching regulator. 500mA may work but 1A is recommended. LM7805 analog regulator is not recommended due to there being not enough room for a heatsink
+* 2.54mm spacing pin headers - various lengths. 15mm for GPS and OLED (OLED may need trimmed). Standard length for everything else. 8 position right angle female for OLED
+* 2.54mm spacing 8 position screw terminal for outside connections
+* 3 and 4 position mating headers or connectors for encoder and led ring connections
