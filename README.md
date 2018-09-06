@@ -14,3 +14,7 @@ This project uses a Teensy 3.2 microcontroller to exchange data with a MegaSquir
   * Version 3, 66 channel w/ 10Hz updates
 * [Waveshare CAN Transceiver](https://www.waveshare.com/sn65hvd230-can-board.htm) connected via serial
 * [Color 320x240 TFT Touchscreen](https://www.pjrc.com/store/display_ili9341_touch.html) connected via SPI
+
+Inspiration for this project is from 
+* openhoon/MSCan_Gauge
+* merkur2k/MSCan_Gauge
